@@ -1,0 +1,14 @@
+# build outputs
+firmware/build/
+firmware/bld/
+tests/build/
+
+# python
+__pycache__/
+*.pyc
+venv/
+
+# local artifacts (recordings, snapshots, vendor PDFs)
+*.mp4
+*.png
+*.pdf
