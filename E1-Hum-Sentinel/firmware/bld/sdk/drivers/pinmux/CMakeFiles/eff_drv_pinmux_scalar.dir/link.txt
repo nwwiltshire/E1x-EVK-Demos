@@ -1,0 +1,2 @@
+/usr/bin/ar qc scalar/libeff_eff_drv_pinmux.a CMakeFiles/eff_drv_pinmux_scalar.dir/pinmux.c.o
+/usr/bin/ranlib scalar/libeff_eff_drv_pinmux.a

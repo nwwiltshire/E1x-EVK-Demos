@@ -22,7 +22,7 @@ HIGH (keys/clink) by the dominant deviant frequency band.
 | E1 compute, fabric build | **2.08 ms / 128 ms chunk** (62x realtime) |
 | E1 compute, scalar build | 8.26 ms / chunk (fabric is **4.0x faster**) |
 | Link (fixed 115200, half-duplex) | ~165–186 ms/chunk round trip, ~5 chunks/s |
-| E1x chip power (VDDIO rail) | **~2.6 mW** → ~72 days on one AA |
+| E1x chip power (VDDIO rail) | **~2.6 mW** at this demo's duty cycle (see [Burn mode](#burn-mode-constant-workload-power-measurement)) |
 
 **Docs:** [How it works](docs/HOW_IT_WORKS.md) — the signal chain,
 what runs on the fabric, and DEV vs DEPLOY in detail.
@@ -63,11 +63,11 @@ venv/bin/python3 host/sentinel_viewer.py --sim 127.0.0.1:5555 --source synth
 
 Give it ~5 s to learn the baseline, then press `1`/`2`/`3` to inject a
 thump/voice/jingle.  Keys: `d` DEV/DEPLOY, `r` relearn, `t/T`
-threshold, `q` quit.  `--source mic` uses the laptop microphone
+threshold, `b` burn mode (see below), `q` quit.  `--source mic` uses the laptop microphone
 (anything you do near the laptop becomes the room), `--source
 wav:file.wav` loops a recording.  The inject keys work on any source.
 
-Tests: `make test` (369 unit checks + protocol/detector e2e against
+Tests: `make test` (378 unit checks + protocol/detector e2e against
 the real sim binary).
 
 ## Going to hardware

@@ -1,0 +1,9 @@
+CREATE /home/admin/GitHub/E1x-EVK-Demos/E1-Hum-Sentinel/firmware/bld/sdk/merged/libeff_all_e1x.a
+ADDLIB /home/admin/GitHub/E1x-EVK-Demos/E1-Hum-Sentinel/firmware/bld/sdk/stdlib/libeff.a
+ADDLIB /home/admin/GitHub/E1x-EVK-Demos/E1-Hum-Sentinel/firmware/bld/sdk/drivers/gpio/scalar/libeff_eff_drv_gpio.a
+ADDLIB /home/admin/GitHub/E1x-EVK-Demos/E1-Hum-Sentinel/firmware/bld/sdk/drivers/i2c/scalar/libeff_eff_drv_i2c.a
+ADDLIB /home/admin/GitHub/E1x-EVK-Demos/E1-Hum-Sentinel/firmware/bld/sdk/drivers/pinmux/scalar/libeff_eff_drv_pinmux.a
+ADDLIB /home/admin/GitHub/E1x-EVK-Demos/E1-Hum-Sentinel/firmware/bld/sdk/drivers/spi/scalar/libeff_eff_drv_spi.a
+ADDLIB /home/admin/GitHub/E1x-EVK-Demos/E1-Hum-Sentinel/firmware/bld/sdk/drivers/uart/scalar/libeff_eff_drv_uart.a
+SAVE
+END

@@ -1,0 +1,22 @@
+CMakeFiles/hum_sentinel_scalar.dir/hal_e1.c.o: \
+  /home/admin/GitHub/E1x-EVK-Demos/E1-Hum-Sentinel/firmware/hal_e1.c \
+  /home/admin/effcc/sdk/include/eff.h \
+  /home/admin/effcc/sdk/include/eff/fabric.h \
+  /home/admin/effcc/sdk/include/eff/arch/e1x/fabric.h \
+  /home/admin/effcc/sdk/include/eff/mmio.h \
+  /home/admin/effcc/sdk/include/eff/arch/e1x/mmio.h \
+  /home/admin/effcc/sdk/include/eff/atc/atcgpio100.h \
+  /home/admin/effcc/sdk/include/eff/platform/helpers.h \
+  /home/admin/effcc/sdk/include/eff/atc/atciic100.h \
+  /home/admin/effcc/sdk/include/eff/atc/atcrtc100.h \
+  /home/admin/effcc/sdk/include/eff/atc/atcspi200.h \
+  /home/admin/effcc/sdk/include/eff/atc/atcuart100.h \
+  /home/admin/effcc/sdk/include/eff/time.h \
+  /home/admin/effcc/sdk/include/eff/arm_neon.h \
+  /home/admin/effcc/sdk/include/eff/error.h \
+  /home/admin/effcc/sdk/include/eff/drivers/gpio.h \
+  /home/admin/effcc/sdk/include/eff/drivers/pinmux.h \
+  /home/admin/effcc/sdk/include/eff/drivers/uart.h \
+  /home/admin/effcc/sdk/include/eff/drivers/i2c.h \
+  /home/admin/effcc/sdk/include/eff/drivers/spi.h \
+  /home/admin/GitHub/E1x-EVK-Demos/E1-Hum-Sentinel/firmware/hal.h
