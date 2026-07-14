@@ -146,6 +146,54 @@ scalar core + fabric + peripherals (~1 mW).  The viewer's power panel
 (`--power-port /dev/ttyACM1`) shows the chip-only headline and the
 one-AA projection.
 
+## Burn mode (constant-workload power measurement)
+
+The ~2.6 mW above is the **average power at this demo's duty cycle**:
+compute is 2.08 ms per chunk but the fixed-115200 link delivers a
+chunk only every ~186 ms, so the fabric is busy ~1% of the time and
+the VDDIO rail reads as nearly all idle power.  Efficient Computer's
+internal benchmarking runs *constant* workloads instead — their fft4k
+reference measures **~4.8 mW** (and a conv3x3 workload ~9 mW) — so
+the two kinds of number are only comparable if you say which one you
+are quoting.
+
+Burn mode produces the constant-workload number.  Press `b` in the
+viewer (or send `SET_PARAM burn=1`, id 9) and the firmware re-runs
+the fabric pipeline (window → FFT → log-magnitude → excess) back to
+back on the last chunk's PCM, one iteration per serial poll — ~99%
+fabric duty.  The viewer pauses audio streaming while burn is on: the
+EVK's UART rx FIFO is only 16 bytes deep, so a 1 KB chunk landing
+mid-iteration would overflow it (a 10-byte SET_PARAM fits).  That
+pause also makes the measurement purer — zero link traffic, exactly
+like a benchmark run.  Detector state (baseline, score, events) is
+untouched; press `b` again and the demo resumes where it left off.
+
+Measurement procedure (give each reading 30+ s; use the 10 s average
+shown in the power panel):
+
+1. **Idle floor** — firmware flashed, viewer connected, burn off, no
+   audio streaming: VDDIO = P_idle.
+2. **Normal demo** — the duty-cycled average (~2.6 mW here).  Quote
+   it as "average power at this demo's duty cycle".
+3. **Burn** — the constant-workload draw; compare against EC's
+   ~4.8 mW fft4k benchmark and quote it as "constant workload".
+
+Derived: energy per chunk ≈ (P_burn − P_idle) × 2.08 ms.
+
+### Battery projection flags
+
+`power_monitor.py` (standalone) and the viewer project life on one AA
+cell (3000 mWh ≈ 2500 mAh at ~1.2 V, energy-based so no voltage
+domains get mixed) for a duty-cycled deployment — *workload of W mW
+run for R s every P hours*:
+
+    --workload-mw       workload power (default: the live 10 s chip
+                        average, so with burn ON the measured
+                        constant-workload draw fills in automatically)
+    --workload-runtime  seconds per wake-up (default 2)
+    --workload-period   hours between wake-ups (default 1)
+    --sleep-mw          sleep power between wake-ups (default 0)
+
 ## Protocol
 
 Little-endian, magic `AA 55`, CRC16-CCITT over everything after the
@@ -158,7 +206,7 @@ or 10 s timeout → retry (3x), then drop and continue with fresh audio.
 
 Params (`SET_PARAM` ids): 1 threshold, 2 k (Q4 dev multiplier),
 3 mode, 4 adapt shift, 5 margin, 6 event hold, 7 learn chunks,
-8 relearn (command).
+8 relearn (command), 9 burn (constant-workload power soak).
 
 ## How detection works
 

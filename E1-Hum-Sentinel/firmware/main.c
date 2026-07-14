@@ -112,7 +112,16 @@ int main(void)
         if (proto_parser_in_msg(&s_parser) && (now - last_rx_ms) > RX_STALL_RESET_MS)
             proto_parser_reset(&s_parser);
 
-        n = hal_serial_read(s_rx, (int)sizeof s_rx, 20);
+        /* Burn mode: saturate the fabric so VDDIO shows the constant-
+         * workload draw, not a ~1% duty-cycle average.  ONE iteration
+         * (~2 ms) per serial poll: the EVK rx FIFO is only 16 bytes
+         * deep, so anything bigger than a SET_PARAM (10 bytes) sent
+         * mid-iteration would overflow it — the host stops streaming
+         * audio while burn is on and only params arrive. */
+        if (s_params.burn)
+            detector_burn(&s_det, &s_params);
+
+        n = hal_serial_read(s_rx, (int)sizeof s_rx, s_params.burn ? 0 : 20);
         if (n <= 0)
             continue;
         last_rx_ms = hal_millis();

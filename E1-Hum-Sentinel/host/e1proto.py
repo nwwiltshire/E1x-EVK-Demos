@@ -36,6 +36,7 @@ PARAM_MARGIN = 5
 PARAM_EVENT_HOLD = 6
 PARAM_LEARN_CHUNKS = 7
 PARAM_RELEARN = 8  # command: value ignored, resets the baseline
+PARAM_BURN = 9  # 1 = fabric power soak between chunks (constant workload)
 
 MODE_DEV = 0
 MODE_DEPLOY = 1

@@ -225,6 +225,21 @@ def case_relearn(binary: str) -> None:
         check(st.learning, "back in learning state")
 
 
+def case_burn(binary: str) -> None:
+    print("case: burn mode (constant-workload power soak)")
+    with Firmware(binary) as fw:
+        c = Client(fw.port)
+        c.learn()
+        check(c.set_param(e1proto.PARAM_BURN, 1), "burn on -> ACK")
+        c.sock.sendall(e1proto.build_get_status())
+        st = c.wait_for(e1proto.STATUS)
+        check(st is not None, "STATUS still answered while burning")
+        check(c.set_param(e1proto.PARAM_BURN, 0), "burn off -> ACK")
+        statuses = c.stream(3)
+        check(not any(s.event for s in statuses),
+              "baseline undisturbed after burn (no events)")
+
+
 def case_deploy(binary: str) -> None:
     print("case: DEPLOY — no spectrum data may leave")
     with Firmware(binary) as fw:
@@ -245,7 +260,7 @@ def main() -> None:
     args = ap.parse_args()
 
     for case in (case_protocol, case_learn_and_quiet, case_anomalies,
-                 case_relearn, case_deploy):
+                 case_relearn, case_burn, case_deploy):
         case(args.fw)
 
     if FAILURES:
