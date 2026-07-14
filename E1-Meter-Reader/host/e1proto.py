@@ -39,6 +39,7 @@ PARAM_CAL_ANGLE_MAX = 6
 PARAM_CAL_VALUE_MIN = 7
 PARAM_CAL_VALUE_MAX = 8
 PARAM_RESET = 9  # command: value ignored, clears the EMA state
+PARAM_BURN = 10  # 1 = fabric power soak between frames (constant workload)
 
 MODE_DEV = 0
 MODE_DEPLOY = 1

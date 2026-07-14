@@ -14,6 +14,7 @@ void params_defaults(params_t *p)
     p->cal_angle_max = 13500;
     p->cal_value_min = 0;
     p->cal_value_max = 100000;
+    p->burn = 0;
 }
 
 int params_set(params_t *p, uint8_t id, int32_t value)
@@ -53,6 +54,11 @@ int params_set(params_t *p, uint8_t id, int32_t value)
         return 0;
     case PARAM_CAL_VALUE_MAX:
         p->cal_value_max = value;
+        return 0;
+    case PARAM_BURN:
+        if (value != 0 && value != 1)
+            return -1;
+        p->burn = value;
         return 0;
     default:
         return -1;
@@ -166,15 +172,23 @@ static int32_t smooth_angle(gauge_t *g, int32_t new_cdeg, int shift)
     return g->ema_cdeg;
 }
 
+/* Kernel input/output buffers (single instance; no reentrancy).  The
+ * raw frame is retained so gauge_burn can re-run the kernels after the
+ * parser buffer holding the FRAME payload has been reused. */
+static uint8_t s_frame[GK_IMG_N];
+static uint8_t s_blur[GK_IMG_N];
+
 void gauge_process(gauge_t *g, const params_t *p, const uint8_t *pixels)
 {
-    static uint8_t s_blur[GK_IMG_N]; /* single instance; no reentrancy */
     int32_t sum = 0;
     int mean, peak_idx;
     int32_t raw_cdeg, smoothed;
     uint32_t total = 0, peak, avg;
 
-    gk_blur3x3(pixels, s_blur, GK_IMG_W, GK_IMG_H);
+    for (int i = 0; i < GK_IMG_N; i++)   /* keep for gauge_burn */
+        s_frame[i] = pixels[i];
+
+    gk_blur3x3(s_frame, s_blur, GK_IMG_W, GK_IMG_H);
     gk_pixel_sum(s_blur, GK_IMG_N, &sum);
     mean = sum >> 12; /* / GK_IMG_N (= 4096), exact */
     gk_ray_scores(s_blur, gk_ray_idx, GK_ANGLES, GK_RADII, mean,
@@ -209,4 +223,17 @@ void gauge_process(gauge_t *g, const params_t *p, const uint8_t *pixels)
     g->value_milli = gauge_value_milli(p, smoothed);
     g->mean = (uint8_t)mean;
     g->frames++;
+}
+
+void gauge_burn(gauge_t *g, const params_t *p)
+{
+    int32_t sum = 0;
+
+    /* Exactly the fabric kernels of gauge_process on the last frame,
+     * recomputing the same scores; argmax/EMA/calibration (control
+     * core) are skipped and no state or counter changes. */
+    gk_blur3x3(s_frame, s_blur, GK_IMG_W, GK_IMG_H);
+    gk_pixel_sum(s_blur, GK_IMG_N, &sum);
+    gk_ray_scores(s_blur, gk_ray_idx, GK_ANGLES, GK_RADII, sum >> 12,
+                  p->polarity ? 1 : -1, g->scores);
 }

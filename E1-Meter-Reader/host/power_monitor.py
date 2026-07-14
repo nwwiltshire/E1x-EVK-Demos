@@ -22,6 +22,7 @@ Standalone:  python3 power_monitor.py --mock
 from __future__ import annotations
 
 import argparse
+import collections
 import math
 import threading
 import time
@@ -33,8 +34,17 @@ _COLS = {"SYS": (1, 3), "1V8": (4, 6), "VDDIO": (7, 9), "VDDVAR": (10, 12)}
 
 AA_CAPACITY_MAH = 2500.0
 
+# usable energy of one AA: 2500 mAh at ~1.2 V average under light load.
+# Energy-based (mWh / mW) so the projection doesn't mix voltage domains
+# the way mAh / rail-mA does.
+AA_ENERGY_MWH = 3000.0
+
 # the rail that represents "the chip" for headline figures
 CHIP_RAIL = "VDDIO"
+
+# window of the rolling per-rail average (single samples wobble; burn
+# measurements need a stable read)
+AVG_WINDOW_S = 10.0
 
 
 def battery_hours(ma: float) -> float:
@@ -42,7 +52,29 @@ def battery_hours(ma: float) -> float:
     return AA_CAPACITY_MAH / max(ma, 1e-3)
 
 
+def duty_avg_mw(workload_mw: float, runtime_s: float, period_h: float,
+                sleep_mw: float = 0.0) -> float:
+    """Average power of a duty-cycled workload: workload_mw for
+    runtime_s out of every period_h hours, sleep_mw in between."""
+    period_s = max(period_h * 3600.0, 1e-9)
+    duty = min(runtime_s / period_s, 1.0)
+    return workload_mw * duty + sleep_mw * (1.0 - duty)
+
+
+def duty_battery_hours(workload_mw: float, runtime_s: float, period_h: float,
+                       sleep_mw: float = 0.0) -> float:
+    """Projected runtime on 1x AA (AA_ENERGY_MWH) for the duty-cycled workload."""
+    return AA_ENERGY_MWH / max(duty_avg_mw(workload_mw, runtime_s,
+                                           period_h, sleep_mw), 1e-9)
+
+
+def fmt_mw(mw: float) -> str:
+    return f"{mw * 1000:.0f} uW" if mw < 1.0 else f"{mw:.1f} mW"
+
+
 def fmt_runtime(hours: float) -> str:
+    if hours >= 10 * 24 * 365:
+        return ">10 years (shelf life)"
     if hours >= 2 * 24 * 365:
         return f"~{hours / (24 * 365):.1f} years"
     if hours >= 2 * 24:
@@ -60,6 +92,7 @@ class _Monitor(threading.Thread):
         self._lock = threading.Lock()
         self._ma: dict[str, float] = {}
         self._mw: dict[str, float] = {}
+        self._hist: collections.deque = collections.deque()  # (t, mw dict)
         self._stop = threading.Event()
 
     def latest_ma(self) -> dict[str, float]:
@@ -70,9 +103,26 @@ class _Monitor(threading.Thread):
         with self._lock:
             return dict(self._mw)
 
+    def avg_mw(self) -> dict[str, float]:
+        """Per-rail mean over the last AVG_WINDOW_S of samples."""
+        with self._lock:
+            hist = list(self._hist)
+        if not hist:
+            return {}
+        out: dict[str, float] = {}
+        for r in RAILS:
+            vals = [mw[r] for _, mw in hist if r in mw]
+            if vals:
+                out[r] = sum(vals) / len(vals)
+        return out
+
     def _publish(self, ma: dict[str, float], mw: dict[str, float]) -> None:
+        now = time.monotonic()
         with self._lock:
             self._ma, self._mw = ma, mw
+            self._hist.append((now, mw))
+            while self._hist and now - self._hist[0][0] > AVG_WINDOW_S:
+                self._hist.popleft()
 
     def stop(self) -> None:
         self._stop.set()
@@ -148,6 +198,16 @@ def main() -> None:
     g.add_argument("--port", help="serial port carrying the EVK power CSV")
     g.add_argument("--mock", action="store_true", help="synthesize readings")
     ap.add_argument("--baud", type=int, default=115200)
+    ap.add_argument("--workload-mw", type=float, default=None,
+                    help="workload power for the AA projection "
+                         "(default: the live 10 s chip average — with burn "
+                         "on, the measured constant-workload draw)")
+    ap.add_argument("--workload-runtime", type=float, default=2.0,
+                    help="seconds the workload runs per wake-up")
+    ap.add_argument("--workload-period", type=float, default=1.0,
+                    help="hours between wake-ups")
+    ap.add_argument("--sleep-mw", type=float, default=0.0,
+                    help="sleep power between wake-ups")
     args = ap.parse_args()
 
     mon = MockPowerMonitor() if args.mock else SerialPowerMonitor(args.port, args.baud)
@@ -155,15 +215,25 @@ def main() -> None:
     try:
         while True:
             time.sleep(0.5)
-            ma, mw = mon.latest_ma(), mon.latest_mw()
+            mw = mon.latest_mw()
             if not mw:
                 print("waiting for data...")
                 continue
+            avg = mon.avg_mw()
+            chip_avg = avg.get(CHIP_RAIL, 0.0)
             rails = "  ".join(f"{r} {mw[r]:6.2f}mW" for r in RAILS)
-            runtime = fmt_runtime(battery_hours(ma.get(CHIP_RAIL, 0.0)))
             tag = " (MOCK)" if mon.is_mock else ""
             print(f"{rails} | chip {mw.get(CHIP_RAIL, 0.0):.2f}mW"
-                  f" | E1x on 1x AA {runtime}{tag}")
+                  f" (10s avg {chip_avg:.2f}){tag}")
+            w = args.workload_mw if args.workload_mw is not None else chip_avg
+            avg_w = duty_avg_mw(w, args.workload_runtime,
+                                args.workload_period, args.sleep_mw)
+            hours = duty_battery_hours(w, args.workload_runtime,
+                                       args.workload_period, args.sleep_mw)
+            print(f"  workload {fmt_mw(w)} x {args.workload_runtime:g}s "
+                  f"every {args.workload_period:g}h "
+                  f"(+{fmt_mw(args.sleep_mw)} sleep) -> avg {fmt_mw(avg_w)} "
+                  f"-> 1x AA {fmt_runtime(hours)}")
     except KeyboardInterrupt:
         pass
     finally:
