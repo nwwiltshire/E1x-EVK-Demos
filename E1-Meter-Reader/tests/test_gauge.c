@@ -404,6 +404,8 @@ static void test_params(void)
     CHECK(params_set(&p, PARAM_CONF_MIN, 300) < 0, "bad conf rejected");
     CHECK(params_set(&p, PARAM_CAL_ANGLE_MIN, 25000) < 0, "bad angle rejected");
     CHECK(params_set(&p, PARAM_CAL_VALUE_MAX, -2000000) == 0, "any value ok");
+    CHECK(params_set(&p, PARAM_BURN, 1) == 0 && p.burn == 1, "set burn");
+    CHECK(params_set(&p, PARAM_BURN, 2) < 0, "bad burn rejected");
     CHECK(params_set(&p, 99, 0) < 0, "unknown id rejected");
 }
 

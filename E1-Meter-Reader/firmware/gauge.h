@@ -30,6 +30,7 @@ enum {
     PARAM_CAL_VALUE_MIN = 7, /* reading x1000 at the scale minimum */
     PARAM_CAL_VALUE_MAX = 8, /* reading x1000 at the scale maximum */
     PARAM_RESET         = 9, /* command: clear the EMA state (value ignored) */
+    PARAM_BURN          = 10,
 };
 
 typedef struct {
@@ -39,6 +40,7 @@ typedef struct {
     int32_t conf_min;
     int32_t cal_angle_min, cal_angle_max; /* cdeg */
     int32_t cal_value_min, cal_value_max; /* milli-units */
+    int32_t burn;                         /* 10: fabric power soak */
 } params_t;
 
 typedef struct {
@@ -66,6 +68,11 @@ void gauge_reset(gauge_t *g); /* clear the EMA (PARAM_RESET) */
  * blurred in place into an internal buffer) and updates every output
  * field of g. */
 void gauge_process(gauge_t *g, const params_t *p, const uint8_t *pixels);
+
+/* Re-run the fabric kernels on the last frame without touching the
+ * reading, smoother, or counters — constant-workload power soak
+ * (PARAM_BURN).  See gauge_burn in gauge.c. */
+void gauge_burn(gauge_t *g, const params_t *p);
 
 /* Map a smoothed angle to a calibrated reading (exposed for tests). */
 int32_t gauge_value_milli(const params_t *p, int32_t angle_cdeg);

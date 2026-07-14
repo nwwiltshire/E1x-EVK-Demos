@@ -26,6 +26,7 @@ void params_defaults(params_t *p)
     p->margin = 6; /* ~4.5 dB above the k*dev band */
     p->event_hold = 4;
     p->learn_chunks = 40; /* ~5 s at 128 ms/chunk */
+    p->burn = 0;
 }
 
 int params_set(params_t *p, uint8_t id, int32_t value)
@@ -52,6 +53,9 @@ int params_set(params_t *p, uint8_t id, int32_t value)
     case PARAM_LEARN_CHUNKS:
         if (value < 4 || value > 1000) return -1;
         p->learn_chunks = value; return 0;
+    case PARAM_BURN:
+        if (value != 0 && value != 1) return -1;
+        p->burn = value; return 0;
     default: /* PARAM_RELEARN is a command, handled in main.c */
         return -1;
     }
@@ -223,6 +227,21 @@ void detector_process(detector_t *d, const params_t *p, const uint8_t *ulaw)
     }
 
     d->chunks++;
+}
+
+void detector_burn(detector_t *d, const params_t *p)
+{
+    /* Exactly the fabric stages of detector_process, on the buffers
+     * the last chunk left behind (recomputing the same spec/excess, so
+     * the next real chunk sees nothing changed).  The u-law decode and
+     * the control-core reductions/hysteresis are skipped — this is the
+     * fabric workload, isolated. */
+    au_window(d->pcm, AU_HANN_Q15, d->wtmp, AU_FFT_N);
+    au_bitrev_gather(d->wtmp, AU_BITREV, d->re, d->im, AU_FFT_N);
+    au_fft(d->re, d->im, AU_TW_RE, AU_TW_IM, AU_FFT_N);
+    au_logmag(d->re, d->im, d->spec, AU_NBINS, AU_MAG2_FLOOR);
+    au_excess(d->spec, d->mu, d->dev, d->excess, AU_NBINS,
+              (int)p->k_q4, (int)(p->margin << 8));
 }
 
 void detector_viz(const detector_t *d, const params_t *p, uint8_t *out)

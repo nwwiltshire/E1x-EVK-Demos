@@ -23,6 +23,7 @@ Usage:
 
 Keys:  d = DEV/DEPLOY   r = relearn baseline   t/T = threshold -/+10
        1/2/3 = inject thump/voice/jingle   q = quit
+       b = burn (constant-workload power soak; streaming pauses)
 """
 
 from __future__ import annotations
@@ -45,7 +46,8 @@ except ImportError as e:
 import e1proto
 from audio_source import Injector, MicSource, SynthSource, WavSource, ulaw_encode
 from power_monitor import (CHIP_RAIL, RAILS, MockPowerMonitor,
-                           SerialPowerMonitor, battery_hours, fmt_runtime)
+                           SerialPowerMonitor, battery_hours, duty_avg_mw,
+                           duty_battery_hours, fmt_mw, fmt_runtime)
 
 CHUNK_SECS = e1proto.AUDIO_BYTES / e1proto.RATE  # 0.128 s
 
@@ -243,6 +245,13 @@ class App:
         self.retries = 0
         self.chunks_sent = 0
         self._next_send = 0.0
+        # burn mode: the firmware loops the fabric pipeline and we stop
+        # streaming audio (16-byte EVK rx FIFO — see README burn section)
+        self.burn = False
+        self.workload_mw = args.workload_mw
+        self.workload_runtime = args.workload_runtime
+        self.workload_period = args.workload_period
+        self.sleep_mw = args.sleep_mw
         # one message in flight — a chunk or a param — resolved by
         # polling, never by blocking: the GUI thread must keep pumping
         # events.  On the EVK a DEV chunk's ACK takes ~150-190 ms (1KB
@@ -415,6 +424,9 @@ class App:
         elif key == ord("T"):
             self.threshold = min(2000, self.threshold + 10)
             self.send_param(e1proto.PARAM_THRESHOLD, self.threshold)
+        elif key == ord("b"):
+            self.burn = not self.burn
+            self.send_param(e1proto.PARAM_BURN, 1 if self.burn else 0)
         elif key in (ord("1"), ord("2"), ord("3")):
             self.injector.inject(Injector.KINDS[key - ord("1")])
         return True
@@ -573,20 +585,37 @@ class App:
         ma, mw = self.power.latest_ma(), self.power.latest_mw()
         tag = " (MOCK)" if self.power.is_mock else ""
         cv2.putText(canvas, f"POWER{tag}", (M + 12, y0 + 24), FONT, 0.55, YELLOW, 2)
+        if self.burn:
+            btxt = "[BURN - constant workload, streaming paused]"
+            (tw, _), _ = cv2.getTextSize(btxt, FONT, 0.5, 2)
+            cv2.putText(canvas, btxt, (CANVAS_W - M - tw - 46, y0 + 24),
+                        FONT, 0.5, RED, 2)
         if mw:
+            avg = self.power.avg_mw()
+            chip = avg.get(CHIP_RAIL, mw.get(CHIP_RAIL, 0.0))
             rail_txt = "  ".join(f"{r} {mw[r]:.1f}" for r in RAILS)
             runtime = fmt_runtime(battery_hours(ma.get(CHIP_RAIL, 0.0)))
             cv2.putText(canvas, f"{rail_txt}  mW", (M + 175, y0 + 24), FONT, 0.5, WHITE, 1)
             cv2.putText(canvas,
-                        f"E1x chip {mw.get(CHIP_RAIL, 0.0):.1f} mW   "
+                        f"E1x chip {chip:.1f} mW (10s avg)   "
                         f"on 1x AA (2500 mAh): {runtime}",
                         (M + 12, y0 + 52), FONT, 0.6, GREEN, 2)
+            w = self.workload_mw if self.workload_mw is not None else chip
+            avg_w = duty_avg_mw(w, self.workload_runtime,
+                                self.workload_period, self.sleep_mw)
+            hours = duty_battery_hours(w, self.workload_runtime,
+                                       self.workload_period, self.sleep_mw)
+            cv2.putText(canvas,
+                        f"workload {fmt_mw(w)} x {self.workload_runtime:g}s "
+                        f"every {self.workload_period:g}h -> "
+                        f"avg {fmt_mw(avg_w)} -> 1x AA {fmt_runtime(hours)}",
+                        (M + 12, y0 + 80), FONT, 0.5, WHITE, 1)
         else:
             cv2.putText(canvas, "waiting for data...", (M + 130, y0 + 24),
                         FONT, 0.5, GRAY, 1)
         cv2.putText(canvas,
                     "d: DEV/DEPLOY   r: relearn   t/T: threshold -/+   "
-                    "1/2/3: inject thump/voice/jingle   q: quit",
+                    "1/2/3: inject thump/voice/jingle   b: burn   q: quit",
                     (M + 12, y0 + h - 12), FONT, 0.5, GRAY, 1)
         if self.writer is not None:
             cv2.circle(canvas, (CANVAS_W - 30, y0 + 24), 9, (60, 60, 230), -1)
@@ -631,7 +660,7 @@ class App:
                 pid, value = self._pending_params.pop(0)
                 self.start_param(pid, value, now)
             if self._inflight is None and not self._pending_params \
-                    and now >= self._next_send:
+                    and not self.burn and now >= self._next_send:
                 self.start_chunk(now)
 
             self.drain_rx()
@@ -685,6 +714,16 @@ def main() -> None:
     ap.add_argument("--power-port", metavar="DEV",
                     help="serial device streaming the EVK power CSV (mock if omitted)")
     ap.add_argument("--power-baud", type=int, default=115200)
+    ap.add_argument("--workload-mw", type=float, default=None,
+                    help="workload power for the AA projection "
+                         "(default: the live 10 s chip average — with burn "
+                         "on, the measured constant-workload draw)")
+    ap.add_argument("--workload-runtime", type=float, default=2.0,
+                    help="seconds the workload runs per wake-up")
+    ap.add_argument("--workload-period", type=float, default=1.0,
+                    help="hours between wake-ups")
+    ap.add_argument("--sleep-mw", type=float, default=0.0,
+                    help="sleep power between wake-ups")
     ap.add_argument("--record", metavar="OUT.MP4", help="record the session video")
     ap.add_argument("--no-relearn", action="store_true",
                     help="keep the baseline the firmware already has "

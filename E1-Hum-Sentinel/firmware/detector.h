@@ -49,6 +49,7 @@ typedef struct {
     int32_t margin;       /* 5: trigger margin, log units        (6)   */
     int32_t event_hold;   /* 6: quiet chunks until event clears  (4)   */
     int32_t learn_chunks; /* 7: fast-learn phase length          (40)  */
+    int32_t burn;         /* 9: 1 = fabric power soak between chunks (0) */
 } params_t;
 
 enum {
@@ -60,6 +61,7 @@ enum {
     PARAM_EVENT_HOLD   = 6,
     PARAM_LEARN_CHUNKS = 7,
     PARAM_RELEARN      = 8, /* command, not a value: reset the baseline */
+    PARAM_BURN         = 9,
 };
 
 void params_defaults(params_t *p);
@@ -98,6 +100,13 @@ void detector_relearn(detector_t *d, const params_t *p);
 /* Process one u-law chunk (AU_CHUNK bytes): decode, transform, score,
  * update the baseline and event state. */
 void detector_process(detector_t *d, const params_t *p, const uint8_t *ulaw);
+
+/* Re-run the fabric pipeline on the last chunk's PCM without touching
+ * the baseline, score, or event state.  Constant-workload power soak
+ * (PARAM_BURN): the demo's ~1% compute duty cycle makes the VDDIO rail
+ * read as nearly all idle power; looping this saturates the fabric so
+ * the rail shows the constant-workload draw instead. */
+void detector_burn(detector_t *d, const params_t *p);
 
 /* Fill out[3*AU_VIZ_BINS] for the SPECTRUM message: max-pooled
  * spectrum, baseline mean, and trigger envelope (u8 log units). */

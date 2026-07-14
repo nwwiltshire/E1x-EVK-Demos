@@ -119,10 +119,61 @@ python3 host/meter_viewer.py --port /dev/ttyACM2 --power-port /dev/ttyACM1 \
    DEPLOY the polar panel becomes the "nothing leaves the chip"
    placard — that's the pitch.
 6. `s` cycles smoothing, `r` resets it, `q` quits.
+7. `b` toggles burn mode — constant-workload power soak, streaming
+   pauses (see "Burn mode" below).
 
 The power panel is *measured* by the EVK's own current sensors
 (`--power-port /dev/ttyACM1`): SYS is the whole dev board, VDDIO the
 E1x chip alone — the number to quote.
+
+## Burn mode (constant-workload power measurement)
+
+The ~2.7 mW in the table is the **average power at this demo's duty
+cycle**: fabric compute is 0.76 ms per frame but a frame round-trips
+in ~0.46 s, so the fabric is busy ~0.2% of the time and the VDDIO
+rail reads as nearly all idle power.  Efficient Computer's internal
+benchmarking runs *constant* workloads instead — their conv3x3
+reference measures **~9 mW** (an fft4k workload ~4.8 mW) — so the two
+kinds of number are only comparable if you say which one you are
+quoting.
+
+Burn mode produces the constant-workload number.  Press `b` in the
+viewer (or send `SET_PARAM burn=1`, id 10) and the firmware re-runs
+the fabric kernels (blur → sum → 240-angle ray scores) back to back
+on a retained copy of the last frame, one iteration per serial poll —
+~99% fabric duty.  The viewer pauses frame streaming while burn is
+on: the EVK's UART rx FIFO is only 16 bytes deep, so a 4 KB frame
+landing mid-iteration would overflow it (a 10-byte SET_PARAM fits).
+That pause also makes the measurement purer — zero link traffic,
+exactly like a benchmark run.  Reading, smoother, and frame counter
+are untouched; press `b` again and the demo resumes where it left
+off.
+
+Measurement procedure (give each reading 30+ s; use the 10 s average
+shown in the power panel):
+
+1. **Idle floor** — firmware flashed, viewer connected, burn off, no
+   frames streaming: VDDIO = P_idle.
+2. **Normal demo** — the duty-cycled average (~2.7 mW here).  Quote
+   it as "average power at this demo's duty cycle".
+3. **Burn** — the constant-workload draw; compare against EC's ~9 mW
+   conv3x3 benchmark and quote it as "constant workload".
+
+Derived: energy per frame ≈ (P_burn − P_idle) × 0.76 ms.
+
+### Battery projection flags
+
+`power_monitor.py` (standalone) and the viewer project life on one AA
+cell (3000 mWh ≈ 2500 mAh at ~1.2 V, energy-based so no voltage
+domains get mixed) for a duty-cycled deployment — *workload of W mW
+run for R s every P hours*:
+
+    --workload-mw       workload power (default: the live 10 s chip
+                        average, so with burn ON the measured
+                        constant-workload draw fills in automatically)
+    --workload-runtime  seconds per wake-up (default 2)
+    --workload-period   hours between wake-ups (default 1)
+    --sleep-mw          sleep power between wake-ups (default 0)
 
 ## The fabric is where the speedup lives
 
@@ -161,7 +212,7 @@ ttyACM2 = the frame link.
 ```
 FRAME      host->fw   4096-byte 64x64 grayscale, seq, CRC16
 SET_PARAM  host->fw   param id + i32 (mode, polarity, smoothing,
-                      conf floor, 4 calibration params, reset)
+                      conf floor, 4 calibration params, reset, burn)
 GET_STATUS host->fw
 SCORES     fw->host   240 x u16 per-angle evidence   (DEV only)
 STATUS     fw->host   angle (cdeg), value (x1000), confidence,

@@ -448,6 +448,9 @@ static void test_params(void)
     CHECK_EQ(params_set(&PR, PARAM_MODE, MODE_DEPLOY), 0);
     CHECK_EQ(params_set(&PR, PARAM_MODE, 7), -1);
     CHECK_EQ(params_set(&PR, PARAM_ADAPT_SHIFT, 13), -1);
+    CHECK_EQ(params_set(&PR, PARAM_BURN, 1), 0);
+    CHECK_EQ(PR.burn, 1);
+    CHECK_EQ(params_set(&PR, PARAM_BURN, 2), -1);
     CHECK_EQ(params_set(&PR, 99, 1), -1);
     CHECK_EQ(params_set(&PR, PARAM_RELEARN, 0), -1); /* command, not a param */
 }

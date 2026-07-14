@@ -228,6 +228,23 @@ def case_polarity(fw: Firmware) -> None:
           f"light needle -60 -> {st.angle_deg if st else '?':+.2f}")
 
 
+def case_burn(fw: Firmware) -> None:
+    print("--- burn mode")
+    c = Client(fw.port)
+    pixels = gauge_sim.render_frame64(45.0)
+    st, _, ack = c.send_frame(1, pixels, expect_scores=True)
+    check(bool(ack and ack.ok), "frame ACKed before burn")
+    check(c.set_param(e1proto.PARAM_BURN, 1), "burn on -> ACK")
+    c.send(e1proto.build_get_status())
+    got = c.collect({e1proto.STATUS})
+    check(e1proto.STATUS in got, "STATUS still answered while burning")
+    check(c.set_param(e1proto.PARAM_BURN, 0), "burn off -> ACK")
+    st, _, ack = c.send_frame(2, pixels, expect_scores=True)
+    check(bool(ack and ack.ok), "frame ACKed after burn off")
+    check(st is not None and st.frames == 2,
+          "burn left the frame counter untouched")
+
+
 def case_smoothing_and_reset(fw: Firmware) -> None:
     print("--- smoothing + reset")
     c = Client(fw.port)
@@ -252,7 +269,7 @@ def main() -> None:
     args = ap.parse_args()
 
     cases = (case_protocol, case_accuracy, case_calibration, case_deploy,
-             case_polarity, case_smoothing_and_reset)
+             case_polarity, case_burn, case_smoothing_and_reset)
     for case in cases:
         with Firmware(args.fw) as fw:
             case(fw)

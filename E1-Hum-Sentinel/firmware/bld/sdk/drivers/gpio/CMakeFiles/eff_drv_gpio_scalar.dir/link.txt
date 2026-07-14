@@ -1,0 +1,2 @@
+/usr/bin/ar qc scalar/libeff_eff_drv_gpio.a CMakeFiles/eff_drv_gpio_scalar.dir/gpio.c.o
+/usr/bin/ranlib scalar/libeff_eff_drv_gpio.a

@@ -1,90 +1,73 @@
 # E1x EVK Demos
 
-Two self-contained demo applications for the [Efficient Computer](https://www.efficient.computer)
-**Electron E1** (E1x silicon, EVK board).  Both follow the same shape:
-a laptop streams sensor data down the EVK serial link, the E1 does the
-real signal processing **on its dataflow fabric**, and the chip sends
-back an answer plus — in DEV mode — the raw evidence behind it, so an
-audience can watch the chip think.
+Two live demos for the [Efficient Computer](https://www.efficient.computer)
+**Electron E1** EVK.  Both put the hot loops on the E1's dataflow
+fabric, keep the branchy control logic on the RISC-V control core, and
+show the audience the difference — compute time, privacy story, and
+*measured* chip power — in a live GUI.
 
-Both demos exist to make one point concrete: the fabric is where the
-speedup lives, and the power number is small enough to change what you
-can build.
+| Demo | What it does | Fabric compute | vs scalar | Chip power (VDDIO) |
+|---|---|---|---|---|
+| [**E1 Hum Sentinel**](E1-Hum-Sentinel/) | Learns a room's acoustic baseline, flags and classes anomalies (1024-pt FFT + spectral novelty on-chip) | 2.08 ms / 128 ms chunk (62x realtime) | 4.0x faster | ~2.6 mW |
+| [**E1 Meter Reader**](E1-Meter-Reader/) | Reads any analog gauge from a webcam (blur + 240-angle ray-cast needle search on-chip) | 0.76 ms / frame | 9.7x faster | ~2.7 mW |
 
-## The demos
-
-### [E1-Meter-Reader](E1-Meter-Reader/) — computer vision
-
-Point a webcam at any analog gauge and the E1 reads it.  The host crops
-the dial to a 64x64 grayscale frame; the chip runs denoise,
-normalization, and a 240-angle ray-cast needle search, and returns a
-calibrated reading with a confidence figure.  DEV mode streams the
-per-angle evidence array, drawn live as a polar plot.
-
-| | |
-|---|---|
-| Fabric compute / frame | **0.76 ms** (scalar build: 7.39 ms — **9.7x**) |
-| E1x chip power (VDDIO) | **2.7 mW** |
-| Accuracy, hardware sweep | worst 0.75 deg (~0.3 % of a 270-deg scale) |
-
-`./run_demo.sh` — no hardware needed.
-
-### [E1-Hum-Sentinel](E1-Hum-Sentinel/) — acoustic anomaly detection
-
-A privacy-first acoustic monitor.  The host streams 8 kHz u-law audio;
-the chip learns the room's baseline hum, runs a 1024-point FFT +
-spectral novelty detector, and flags anomalies within a few hundred ms —
-classed LOW (thump), MID (voice), or HIGH (keys/clink).  In DEPLOY mode
-the audio is analyzed on-chip and **no spectrum or audio-derived data
-leaves the device**.
-
-| | |
-|---|---|
-| Fabric compute / 128 ms chunk | **2.08 ms** (62x realtime; scalar: 8.26 ms — **4.0x**) |
-| E1x chip power (VDDIO) | **~2.6 mW** → ~72 days on one AA |
-
-`make sim` + `sentinel_viewer.py --sim` — no hardware needed.
+Each demo runs with **no hardware** (the firmware builds as a Linux
+process; the serial link becomes a loopback TCP socket) — see each
+README's quick start.  On hardware, the host talks to the EVK over the
+USB bridge (fixed ~115200 baud, half-duplex) and reads the board's own
+current sensors for the power panel.
 
 ## Shared architecture
 
-Both projects are built the same way, deliberately — the second was
-scaffolded from the first, and the pattern is the recommended starting
-point for a third:
+Both demos are the same shape, by design:
 
-```
-firmware/     portable C99 core + two HAL backends behind a 6-function seam
-  main.c        superloop: rx -> process -> tx
-  *.c/.h        control-core logic (branchy, sequential)
-  dsp/kernels   __efficient__ fabric kernels (the hot loops)
-  *_tables.c    generated const tables (see tools/)
-  protocol.c/h  AA 55 framing, CRC16, parser, builders
-  hal_posix.c   simulator: "serial" = loopback TCP  -> runs on any laptop
-  hal_e1.c      EVK: UART3 through the USB bridge
-  echo_main.c   gap-echo link bring-up app
-host/         Python GUI, protocol mirror, power telemetry, smoke tests
-tests/        C unit tests vs reference implementations + sim e2e
-tools/        table generators
-docs/         HOW_IT_WORKS.md + DEVELOPING_ON_E1.md
-```
+- **Portable C99 firmware** — a superloop over a 6-function HAL:
+  `hal_posix.c` (simulator) and `hal_e1.c` (EVK UART3 via the SDK).
+- **Fabric kernels** — the DSP/image hot loops are annotated
+  `__efficient__`; everything else stays on the control core.  Each
+  STATUS reply carries the measured on-chip compute time, so a
+  mis-annotated (silently all-scalar) build is obvious in the GUI.
+- **One wire protocol family** — magic `AA 55`, CRC16-CCITT, one
+  message in flight, ACK last.  Mirrored in Python (`host/e1proto.py`).
+- **DEV / DEPLOY modes** — DEV streams the chip's intermediate
+  evidence (spectrum / per-angle scores) so you can watch it think;
+  DEPLOY sends readings only — no raw-data-derived payload leaves the
+  chip.
+- **Measured power** — `host/power_monitor.py` parses the EVK's power
+  CSV (ttyACM1); VDDIO = the E1x chip alone, the headline number.
 
-Every demo runs end-to-end **with no hardware**: `hal_posix.c` builds the
-real firmware as a Linux process with a TCP loopback standing in for the
-serial port.  The protocol, the fabric kernels (compiled by gcc via the
-`__efficient__` guard macro), and all the DSP are the same code that
-ships to the chip.
+## Power measurement and burn mode
 
-## Requirements
+The headline mW figures above are **averages at each demo's duty
+cycle**: the fabric finishes a chunk/frame in ~1–2 ms but the
+fixed-115200 link delivers work only every ~0.2–0.5 s, so the rail
+mostly shows idle power.  Efficient Computer's internal benchmarks run
+*constant* workloads (fft4k ~4.8 mW, conv3x3 ~9 mW) — a different
+kind of number.
 
-- **Simulator (no hardware):** Python 3.10+, gcc, make.  Each project has
-  its own `host/requirements.txt`.
-- **Hardware:** an Electron E1 EVK and the Efficient SDK at `~/effcc`
-  (version 25.4 — what these numbers were measured against).
+**Burn mode** bridges the two: press `b` in either viewer (or send
+`SET_PARAM burn=1`) and the firmware re-runs its fabric pipeline back
+to back on the last chunk/frame — ~99% fabric duty, streaming paused,
+zero link traffic — so the VDDIO rail reads the constant-workload
+draw.  Detector/reading state is untouched; press `b` again to resume
+the demo.  Each demo README has the full 3-step measurement procedure
+(idle floor → duty-cycled average → constant workload).
 
-## Building the next one
+Both the viewers and standalone `power_monitor.py` also project life
+on one AA cell (3000 mWh) for a duty-cycled deployment — *workload of
+W mW run for R s every P hours* — via `--workload-mw`
+`--workload-runtime` `--workload-period` `--sleep-mw`.  The workload
+power defaults to the live 10 s chip average, so with burn on the
+measured constant-workload draw fills in automatically.
 
-Start from `docs/DEVELOPING_ON_E1.md` in either project, copy the
-firmware skeleton (HAL seam, protocol, echo bring-up app, dual
-fabric/scalar CMake build), and bring the link up with `echo_test.py`
-before writing a line of application code.  The bring-up ladder —
-link_echo → echo_test → hw_smoke → the demo — is what makes a bad day on
-the EVK debuggable.
+## Going deeper
+
+- [E1-Hum-Sentinel/docs/HOW_IT_WORKS.md](E1-Hum-Sentinel/docs/HOW_IT_WORKS.md)
+  and [E1-Meter-Reader/docs/HOW_IT_WORKS.md](E1-Meter-Reader/docs/HOW_IT_WORKS.md)
+  — each demo's full pipeline and the DEV vs DEPLOY story.
+- [DEVELOPING_ON_E1.md](E1-Hum-Sentinel/docs/DEVELOPING_ON_E1.md) —
+  EVK field notes (link physics, fabric rules, board switches, port
+  map): start here to build the next E1 application.
+
+Tests: each demo has `make test` (C unit tests + end-to-end against
+the real firmware binary over the sim's TCP serial port).

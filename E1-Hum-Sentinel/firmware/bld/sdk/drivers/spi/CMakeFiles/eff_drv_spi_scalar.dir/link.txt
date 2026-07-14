@@ -1,0 +1,2 @@
+/usr/bin/ar qc scalar/libeff_eff_drv_spi.a CMakeFiles/eff_drv_spi_scalar.dir/spi.c.o
+/usr/bin/ranlib scalar/libeff_eff_drv_spi.a

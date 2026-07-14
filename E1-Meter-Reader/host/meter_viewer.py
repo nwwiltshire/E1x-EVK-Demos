@@ -20,6 +20,7 @@ Keys:
   d  DEV/DEPLOY          p  needle polarity      s  smoothing 0/1/2/3
   [  needle is at scale MIN (--cal-min)          r  reset smoothing
   ]  needle is at scale MAX (--cal-max)          q  quit
+  b  burn (constant-workload power soak; streaming pauses)
   +/- resize the circle
 """
 
@@ -42,7 +43,8 @@ except ImportError as e:
 
 import e1proto
 from power_monitor import (CHIP_RAIL, RAILS, MockPowerMonitor,
-                           SerialPowerMonitor, battery_hours, fmt_runtime)
+                           SerialPowerMonitor, duty_battery_hours, fmt_mw,
+                           fmt_runtime)
 
 MARGIN = 10
 CAM_W, CAM_H = 640, 480
@@ -238,6 +240,13 @@ class App:
         self.retries = 0
         self.smooth = 2
         self.polarity = 0
+        # burn mode: the firmware loops the fabric kernels and we stop
+        # streaming frames (16-byte EVK rx FIFO — see README burn section)
+        self.burn = False
+        self.workload_mw = args.workload_mw
+        self.workload_runtime = args.workload_runtime
+        self.workload_period = args.workload_period
+        self.sleep_mw = args.sleep_mw
         # one frame in flight, polled without blocking so the preview
         # stays live: [wire bytes, sent_at, attempt]
         self._inflight = None
@@ -373,6 +382,11 @@ class App:
         elif key == ord("r"):
             self.send_param(e1proto.PARAM_RESET, 0)
             self.flash("smoothing state reset")
+        elif key == ord("b"):
+            self.burn = not self.burn
+            self.send_param(e1proto.PARAM_BURN, 1 if self.burn else 0)
+            self.flash("burn: constant workload, streaming paused"
+                       if self.burn else "burn off: streaming resumed")
         elif key == ord("["):
             raw = self._raw_needle_cdeg()
             if raw is None:
@@ -551,7 +565,7 @@ class App:
         rate = f"tx {self.fps:4.2f} fps"
         lines = [
             rate + f"   retries {self.retries}   crc errs {self.rx.parser.crc_errors}",
-            "d DEV/DEPLOY   p polarity   s smooth   r reset",
+            "d DEV/DEPLOY   p polarity   s smooth   r reset   b burn",
             f"[ needle at MIN ({self.cal_min:g})   ] needle at MAX ({self.cal_max:g})",
             "drag circle onto dial, wheel/+/- to resize   q quit",
         ]
@@ -562,20 +576,30 @@ class App:
         # power (measured by the EVK's own sensors; VDDIO = the chip),
         # in the free space under the polar panel
         pxp, pyy = px0, MARGIN + POLAR_S + 30
-        ma, mw = self.power.latest_ma(), self.power.latest_mw()
+        mw = self.power.latest_mw()
         tag = " (MOCK)" if self.power.is_mock else ""
         cv2.putText(canvas, f"POWER{tag}", (pxp, pyy), FONT, 0.62, YELLOW, 2)
+        if self.burn:
+            (tw, _), _ = cv2.getTextSize(f"POWER{tag}", FONT, 0.62, 2)
+            cv2.putText(canvas, "[BURN - streaming paused]",
+                        (pxp + tw + 10, pyy), FONT, 0.45, RED, 1)
         if mw:
             rail_txt = "  ".join(f"{r} {mw[r]:.1f}" for r in RAILS)
-            cv2.putText(canvas, f"{rail_txt}  mW", (pxp, pyy + 28), FONT, 0.45,
+            cv2.putText(canvas, f"{rail_txt}  mW", (pxp, pyy + 24), FONT, 0.45,
                         WHITE, 1)
-            runtime = fmt_runtime(battery_hours(ma.get(CHIP_RAIL, 0.0)))
+            chip = self.power.avg_mw().get(CHIP_RAIL, mw.get(CHIP_RAIL, 0.0))
+            cv2.putText(canvas, f"E1x chip {chip:.1f} mW (10s avg)",
+                        (pxp, pyy + 44), FONT, 0.5, GREEN, 2)
+            w = self.workload_mw if self.workload_mw is not None else chip
+            hours = duty_battery_hours(w, self.workload_runtime,
+                                       self.workload_period, self.sleep_mw)
             cv2.putText(canvas,
-                        f"E1x chip {mw.get(CHIP_RAIL, 0.0):.1f} mW"
-                        f"   on 1x AA: {runtime}",
-                        (pxp, pyy + 58), FONT, 0.55, GREEN, 2)
+                        f"{fmt_mw(w)} x {self.workload_runtime:g}s/"
+                        f"{self.workload_period:g}h -> 1x AA "
+                        f"{fmt_runtime(hours)}",
+                        (pxp, pyy + 64), FONT, 0.45, WHITE, 1)
         else:
-            cv2.putText(canvas, "waiting for data...", (pxp, pyy + 28), FONT,
+            cv2.putText(canvas, "waiting for data...", (pxp, pyy + 24), FONT,
                         0.5, GRAY, 1)
 
         # transient message
@@ -614,7 +638,7 @@ class App:
                 self.poll_frame_ack(now)
             elif self._pending_params:
                 self._flush_params()
-            else:
+            elif not self.burn:
                 self.start_frame(small.tobytes(), now)
 
             canvas = self.render(frame, small)
@@ -666,6 +690,16 @@ def main() -> None:
     ap.add_argument("--power-port", metavar="DEV",
                     help="serial device streaming the EVK power CSV (mock if omitted)")
     ap.add_argument("--power-baud", type=int, default=115200)
+    ap.add_argument("--workload-mw", type=float, default=None,
+                    help="workload power for the AA projection "
+                         "(default: the live 10 s chip average — with burn "
+                         "on, the measured constant-workload draw)")
+    ap.add_argument("--workload-runtime", type=float, default=2.0,
+                    help="seconds the workload runs per wake-up")
+    ap.add_argument("--workload-period", type=float, default=1.0,
+                    help="hours between wake-ups")
+    ap.add_argument("--sleep-mw", type=float, default=0.0,
+                    help="sleep power between wake-ups")
     ap.add_argument("--snapshot", metavar="OUT.PNG",
                     help="save the canvas to this file once per second")
     args = ap.parse_args()
